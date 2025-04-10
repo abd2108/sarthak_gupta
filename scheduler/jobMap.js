@@ -30,38 +30,75 @@ async function loadJobsFromDB() {
 }
 
 // Remove a job from the map after execution
-function removeJobFromMap(jobId, timestamp) {
-  if (!jobId || typeof jobId.toString !== 'function') {
-    console.error('❌ Invalid jobId provided for removal:', jobId);
-    return;
-  }
+//const Job = require('../models/jobModel'); // Assuming the Job model is in this path
 
-  if (jobMap.has(timestamp)) {
-    const jobs = jobMap.get(timestamp).filter(job => job._id?.toString() !== jobId.toString());
-    if (jobs.length === 0) {
-      jobMap.delete(timestamp); // If no more jobs at this timestamp, remove the key
+async function removeJobFromMap(name, timestamp) {
+    if (!name || !timestamp) {
+      console.error('❌ Name and timestamp are required.');
+      return;
+    }
+  
+    if (jobMap.has(timestamp)) {
+      const jobs = jobMap.get(timestamp);
+  
+      const updatedJobs = jobs.filter(job => job.name !== name);
+  
+      if (updatedJobs.length === 0) {
+        jobMap.delete(timestamp);
+        console.log(`✅ All jobs at timestamp ${timestamp} removed from map.`);
+      } else {
+        jobMap.set(timestamp, updatedJobs);
+        console.log(`✅ Job "${name}" removed from timestamp ${timestamp} in map.`);
+      }
+  
+      // Remove from DB
+      try {
+        const result = await Job.deleteOne({ name, timestamp });
+        if (result.deletedCount > 0) {
+          console.log(`✅ Job "${name}" removed from the database.`);
+        } else {
+          console.warn(`⚠️ No job found in DB with name "${name}" and timestamp ${timestamp}.`);
+        }
+      } catch (err) {
+        console.error(`❌ Error removing job from DB: ${err.message}`);
+      }
     } else {
-      jobMap.set(timestamp, jobs); // Update the map with the remaining jobs
+      console.warn(`⚠️ No jobs found at timestamp ${timestamp} in jobMap.`);
     }
   }
-}
+  
+
 
 // Reschedule recurring job
 function rescheduleJob(job) {
-  const { timestamp, interval, type, _id } = job;
+    const { timestamp, interval, type, _id } = job;
   
-  // Only process recurring jobs
-  if (type === 'recurring' && interval) {
-    const newTimestamp = timestamp + interval;
-
-    // Create a new job with the updated timestamp
-    const newJob = { ...job, timestamp: newTimestamp, _id: undefined }; // Set _id to undefined to treat it as a new job
-    removeJobFromMap(_id, timestamp); // Remove the job from its old timestamp
-    addJobToMap(newJob); // Add the new job at the updated timestamp
-
-    console.log(`🔁 Rescheduled job "${job.name}" from ${timestamp} to ${newTimestamp}`);
+    if (type === 'recurring' && interval) {
+      const newTimestamp = timestamp + interval;
+  
+      // ✅ Convert to plain object and fully remove _id
+      let newJob = job.toObject ? job.toObject() : JSON.parse(JSON.stringify(job));
+      delete newJob._id;
+      newJob.timestamp = newTimestamp;
+  
+      // Optional: remove old job from in-memory map
+      removeJobFromMap(_id, timestamp);
+  
+      // ✅ Add to in-memory map
+      addJobToMap(newJob);
+  
+      // ✅ Save new job to DB
+      Job.create(newJob)
+        .then(savedJob => {
+          console.log(`🔁 Rescheduled job "${savedJob.name}" to timestamp ${newTimestamp}`);
+        })
+        .catch(err => {
+          console.error(`❌ Failed to save rescheduled job "${newJob.name}":`, err);
+        });
+    }
   }
-}
+  
+  
 
 // Exported stuff
 module.exports = {

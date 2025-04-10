@@ -3,7 +3,7 @@ const { addToQueue } = require('./worker');
 const Job = require('../models/jobModel');
 
 function startScheduler() {
-  setInterval(() => {
+  setInterval(async () => {
     const currentTime = Math.floor(Date.now() / 1000); // current epoch in seconds
 
     const jobsToRun = jobMap.get(currentTime);
@@ -11,10 +11,10 @@ function startScheduler() {
       console.log(`⏰ Found ${jobsToRun.length} job(s) at ${currentTime}`);
 
       // Iterate over each job found at this timestamp
-      jobsToRun.forEach(job => {
+      for (const job of jobsToRun) {
         if (!job || !job._id) {
           console.error("❌ Skipping invalid job:", job);
-          return;
+          continue;
         }
 
         // Convert Mongoose job to plain object if necessary
@@ -24,11 +24,11 @@ function startScheduler() {
         addToQueue(jobObject);
 
         // Remove the job from the map after it's been processed
-        removeJobFromMap(jobObject._id, currentTime);
+        removeJobFromMap(jobObject.name, jobObject.timestamp);
 
         // Check if the job is recurring and reschedule it
         if (jobObject.type === 'recurring') {
-          const nextTime = Math.floor(Date.now() / 1000) + jobObject.interval;
+          const nextTime = Math.floor(Date.now() / 1000)+ jobObject.interval;
         
           // Retrieve existing jobs for the next timestamp
           let existingJobs = jobMap.get(nextTime);
@@ -44,7 +44,7 @@ function startScheduler() {
         
           console.log(`🔁 Rescheduled recurring job "${jobObject.name}" for ${nextTime}`);
         }
-      });
+      }
 
       // Once all jobs are executed, remove them from the map.
       jobMap.delete(currentTime);

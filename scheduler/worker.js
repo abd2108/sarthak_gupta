@@ -1,61 +1,86 @@
-let jobQueue = []; // This will be our global queue
+const Job = require('../models/jobModel');
+const { exec } = require('child_process');
 
-// Function to add jobs to the queue
-function addToQueue(job) {
-  jobQueue.push(job);
-  console.log(`📝 Job "${job.name}" added to the queue`);
-}
+let jobQueue = []; // In-memory queue
+let isProcessing = false;
+const jobMap = new Map(); // Needed for recurring jobs
 
-// Function to process jobs from the queue
-function processQueue() {
-  // Continue processing as long as the queue is not empty
-  while (jobQueue.length > 0) {
-    // Get the first job in the queue
-    const job = jobQueue.shift();
+// ✅ Add job to queue and process
+async function addToQueue(job) {
+  try {
+    jobQueue.push(job);
+    console.log(`📝 Job "${job.name}" added to the queue`);
 
-    console.log(`⚙️ Executing job: "${job.name}"`);
+    // ❗ Remove _id if present
+    const jobToSave = { ...job };
+    delete jobToSave._id;
 
-    // Here we execute the job (can be customized to run actual commands, etc.)
-    executeJob(job);
-  }
-}
+    const newJob = new Job(jobToSave);
+    await newJob.save();
+    console.log(`📝 Job "${job.name}" saved to the database`);
 
-// Function to simulate job execution (replace with actual job execution logic)
-function executeJob(job) {
-    const { exec } = require('child_process');
-    
-    // Accessing the command inside the payload object
-    const command = job.payload.command;
-  
-    if (!command) {
-      console.error(`❌ Invalid command for job: "${job.name}"`);
-      return;
-    }
-  
-    exec(command, (error, stdout, stderr) => {
-      if (error) {
-        // Custom error message for failed command
-        console.error(`❌ Job execution failed: Error: Try a valid command`);
-        return;
-      }
-      if (stderr) {
-        // Custom error message for stderr output (if any)
-        console.error(`❌ Job execution error: Try a valid command`);
-        return;
-      }
-  
-      console.log(`✅ Job executed successfully: ${stdout}`);
-    });
-  }
-  
-
-// Worker constantly processes jobs in the queue
-function startWorker() {
-  setInterval(() => {
-    if (jobQueue.length > 0) {
+    // 🔄 Start processing if not already
+    if (!isProcessing) {
       processQueue();
     }
-  }, 1000); // Check for jobs every second
+  } catch (error) {
+    console.error(`❌ Failed to add job "${job.name}":`, error);
+  }
+}
+
+// ✅ Process the queue
+async function processQueue() {
+  isProcessing = true;
+
+  while (jobQueue.length > 0) {
+    const job = jobQueue.shift();
+    console.log(`⚙️ Executing job: "${job.name}"`);
+
+    await executeJob(job);
+
+    await Job.updateOne({ _id: job._id }, { $set: { status: 'completed' } });
+
+    if (job.type === 'recurring') {
+      const nextTime = job.timestamp + job.interval;
+      const existingJobs = jobMap.get(nextTime) || [];
+      existingJobs.push(job);
+      jobMap.set(nextTime, existingJobs);
+    }
+  }
+
+  isProcessing = false;
+}
+
+// ✅ Execute a job (Shell Command)
+function executeJob(job) {
+  return new Promise((resolve) => {
+    const command = job.payload.command;
+
+    if (!command) {
+      console.error(`❌ Invalid command for job: "${job.name}"`);
+      return resolve();
+    }
+
+    exec(command, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`❌ Execution failed for "${job.name}": ${error.message}`);
+        return resolve();
+      }
+
+      // stderr can include curl download progress — not always an error
+      if (stderr.toLowerCase().includes('error')) {
+        console.error(`❌ stderr output in "${job.name}": ${stderr}`);
+      }
+
+      console.log(`✅ Job "${job.name}" executed:\n${stdout}`);
+      resolve();
+    });
+  });
+}
+
+// Worker entry point — optional placeholder
+function startWorker() {
+  // Can be used to reprocess future jobs or scheduled queue
 }
 
 module.exports = { addToQueue, startWorker };

@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
-const Job = require('../models/jobModel');
-const { addJobToMap } = require('../scheduler/jobMap');
+const {Job} = require('../models/jobModel'); // Keep this import
+const { addJobToMap,removeJobFromMap } = require('../scheduler/jobMap');
 
 // POST /add-job
 router.post('/add-job', async (req, res) => {
@@ -21,5 +21,22 @@ router.post('/add-job', async (req, res) => {
     res.status(500).json({ error: 'Failed to schedule job' });
   }
 });
+
+router.post('/remove-job', async (req, res) => {
+    try {
+      const { name, timestamp } = req.body;
+  
+      if (!name || !timestamp) {
+        return res.status(400).json({ error: '❌ name and timestamp are required' });
+      }
+  
+      await removeJobFromMap(name, timestamp);
+  
+      res.status(200).json({ message: `✅ Job "${name}" at timestamp ${timestamp} removed.` });
+    } catch (err) {
+      console.error(`❌ Failed to remove job:`, err);
+      res.status(500).json({ error: 'Failed to remove job' });
+    }
+  });
 
 module.exports = router;
